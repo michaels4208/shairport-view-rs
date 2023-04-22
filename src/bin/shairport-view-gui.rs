@@ -2,13 +2,10 @@ use fltk::{app, group::{Flex, Group}, frame::Frame, image::SharedImage, prelude:
     enums::{Align, Color, FrameType}};
 use std::error::Error;
 use std::thread;
-use std::sync::mpsc::{self, Sender, Receiver};
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 const INIT_WINDOW_W: i32 = 1200;
 const INIT_WINDOW_H: i32 = 900;
-const SHOW_LAYOUT: bool = false;  // Display frame boundaries
 
 #[derive(Debug, Clone)]
 pub enum UIError {

@@ -1,15 +1,25 @@
 use amxml::sax::*;
-use std::{fmt, env, fs, io::{BufRead, BufReader}};
+use std::{fmt::{self, Display}, env, fs::File, io::{self, BufRead, BufReader, Write}, error::Error};
 use std::sync::mpsc;
 use base64::{Engine as _, engine::general_purpose};
-use fltk::image;
+use fltk::{prelude::{ImageExt, FltkError}, image::{SharedImage, JpegImage, PngImage}};
+
+#[derive(Debug, Clone)]
+struct MetadataError(String);
+
+impl Display for MetadataError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Metadata Error: {}", self.0)
+    }
+}
+
+impl Error for MetadataError {}
 
 enum Metadata {
     Track(String),
     Artist(String),
     Album(String),
-    // Art(image::PngImage),
-    Art(Vec<u8>),
+    Art(SharedImage),
 }
 
 impl fmt::Display for Metadata {
@@ -19,41 +29,38 @@ impl fmt::Display for Metadata {
             Self::Artist(artist) => write!(f, "Artist: {}", artist),
             Self::Album(album) => write!(f, "Album: {}", album),
             Self::Art(art) => {
-                let l = art.len();
-                fs::write(format!("{l}.png"), art).expect("Couldn't write image");
-                write!(f, "Wrote image with length {l} to file")
-            }
+                let (w, h) = (art.w(), art.h());
+                write!(f, "Art is a {w}x{h} image")
+            },
         }
     }
 }
 
-fn get_metadata_source<T>() -> Result<T, Box<dyn std::error::Error>>
-    where T: BufRead,
-{
-    // If a path arg was provided, open the pipe at that path
-    let cli_args: Vec<String> = env::args().collect();
-    if cli_args.len() > 1 {
-        let pipe_handle = std::fs::File::open(cli_args[1])?;
-        Ok(BufReader::new(pipe_handle).lines())
-    }
-    else {
-        Ok(std::io::stdin().lock())
+impl Metadata {
+    fn make_art(art: Vec<u8>) -> Result<Metadata, Box<dyn std::error::Error>> {
+        if art.len() == 0 {
+            Err(Box::new(MetadataError("Invalid art bytes".to_owned())))
+        }
+        else if art[0] == 0xff {
+            Ok(Metadata::Art(SharedImage::from_image(JpegImage::from_data(&art)?)?))
+        }
+        else {
+            Ok(Metadata::Art(SharedImage::from_image(PngImage::from_data(&art)?)?))
+        }
     }
 }
 
 // Executable for viewing shairport-sync metadata on the command line
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let metadata_source = get_metadata_source().unwrap(); // Panic if we can't get a data source
-    let pipe_rx = spawn_pipe_channel(metadata_source)?;
-    let mut xml_metadata = XMLMetadata::new();
+    let pipe_rx = spawn_metadata_channel()?;
+    let mut xml_metadata = XMLMetadata::new()?;
 
     loop {
         // println!("Reading pipe");
         match pipe_rx.try_recv() {
             Ok(xml_line) => {
                 // println!("Main thread got XML Data:\n  {xml_line}");
-                let (new_metadata, pipe_closed) = xml_metadata.parse_line(&xml_line);
-                for metadata in new_metadata {
+                for metadata in xml_metadata.parse_line(&xml_line) {
                     println!("{}", metadata);
                 }
             },
@@ -70,19 +77,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 struct XMLMetadata {
     tag_stack: Vec<String>,
     curr_type: String,
-    curr_code: String
+    curr_code: String,
+    default_art: SharedImage,
 }
 
 impl XMLMetadata {
-    fn new() -> Self {
-        Self{
+    fn new() -> Result<Self, FltkError> {
+        Ok(Self{
             tag_stack: Vec::new(),
             curr_type: "".to_owned(),
             curr_code: "".to_owned(),
-        }
+            default_art: SharedImage::from_image(PngImage::from_data(include_bytes!("../resources/img/no-art.png"))?)?,
+        })
     }
 
-    fn parse_line(&mut self, metadata: &str) -> (Vec<Metadata>, bool) {
+    fn parse_line(&mut self, metadata: &str) -> Vec<Metadata> {
         let mut dec = SaxDecoder::new(metadata).unwrap();
         let def_tag: &str = "No tag";
         let mut found_metadata: Vec<Metadata> = Vec::new();
@@ -91,7 +100,7 @@ impl XMLMetadata {
             match dec.raw_token() {
                 Ok(XmlToken::EOF) => {
                     //println!("End");
-                    return (found_metadata, true)
+                    return found_metadata
                 },
                 Ok(XmlToken::StartElement{name, ..}) => {
                     //println!("found start={name}");
@@ -122,8 +131,15 @@ impl XMLMetadata {
                                 ("core", "asar") => found_metadata.push(Metadata::Artist(decode_xml_b64(chardata))),
                                 ("core", "asal") => found_metadata.push(Metadata::Album(decode_xml_b64(chardata))),
                                 ("core", "minm") => found_metadata.push(Metadata::Track(decode_xml_b64(chardata))),
-                                // ("ssnc", "PICT") => found_metadata.push(Metadata::Art(image::PngImage::from_data(decode_xml_b64(chardata).unwrap()))),
-                                ("ssnc", "PICT") => found_metadata.push(Metadata::Art(general_purpose::STANDARD.decode(chardata).unwrap())),
+                                ("ssnc", "PICT") => {
+                                    match Metadata::make_art(general_purpose::STANDARD.decode(chardata).unwrap()) {
+                                        Ok(art) => found_metadata.push(art),
+                                        Err(e) => {
+                                            _ = io::stdout().write_all(format!("Error when processing metadata: {}", e).as_bytes());
+                                            found_metadata.push(Metadata::Art(self.default_art.clone()))
+                                        },
+                                    }
+                                },
                                 _ => (),
                             }
                         }
@@ -139,11 +155,7 @@ impl XMLMetadata {
                 _ => {},
             }
         }
-
-        (found_metadata, false)
     }
-
-
 }
 
 fn decode_xml_hex(chardata: String) -> String {
@@ -170,17 +182,30 @@ fn decode_xml_b64(chardata: String) -> String {
     }
 }
 
-// Spawn a thread that reads from a pipe and sends back data
-// Reading from a pipe is a blocking operation,
-// but reading from the channel this thread returns doesn't have to be
-fn spawn_pipe_channel<T>(metadata_source: T) -> Result<mpsc::Receiver<String>, Box<dyn std::error::Error>>
-    where T: BufRead,
+fn spawn_metadata_channel() -> Result<mpsc::Receiver<String>, Box<dyn std::error::Error>>
 {
-    //let mut pipe_reader = BufReader::new(metadata_pipe).lines();
+    // If a path arg was provided, open the pipe at that path
+    let cli_args: Vec<String> = env::args().collect();
+    if cli_args.len() > 1 {
+        let pipe_handle = BufReader::new(File::open(&cli_args[1])?);
+        Ok(spawn_metadata_channel_pipe(pipe_handle))
+    }
+    else {
+        Ok(spawn_metadata_channel_stdin())
+    }
+}
+
+// Spawn a thread that reads from stdin and sends back data
+// Reading from stdin line by line is a blocking operation,
+// but reading from the channel this thread returns doesn't have to be
+fn spawn_metadata_channel_stdin() -> mpsc::Receiver<String>
+{
     let (tx, rx) = mpsc::channel::<String>();
     // Thread that sends non-empty lines from the pipe over a channel
     // Thread sleeps on empty lines, ends on pipe read errors or pipe writer close / end of pipe
-    std::thread::spawn(move ||
+    std::thread::spawn(move || {
+        let mut metadata_source = io::stdin().lock().lines();
+
         loop {
             match metadata_source.next() {
                 Some(Ok(line)) if line.len() > 0 => tx.send(line).unwrap(),
@@ -188,6 +213,28 @@ fn spawn_pipe_channel<T>(metadata_source: T) -> Result<mpsc::Receiver<String>, B
                 Some(Err(_)) => break,
                 None => break,
             }
-        });
-    Ok(rx)
+        }});
+    rx
+}
+
+// Spawn a thread that reads from a pipe and sends back data
+// Reading from a pipe is a blocking operation,
+// but reading from the channel this thread returns doesn't have to be
+fn spawn_metadata_channel_pipe(metadata_pipe: BufReader<File>) -> mpsc::Receiver<String>
+{
+    let (tx, rx) = mpsc::channel::<String>();
+    // Thread that sends non-empty lines from the pipe over a channel
+    // Thread sleeps on empty lines, ends on pipe read errors or pipe writer close / end of pipe
+    std::thread::spawn(move || {
+        let mut metadata_source = metadata_pipe.lines();
+
+        loop {
+            match metadata_source.next() {
+                Some(Ok(line)) if line.len() > 0 => tx.send(line).unwrap(),
+                Some(Ok(_)) => std::thread::sleep(std::time::Duration::from_millis(100)),
+                Some(Err(_)) => break,
+                None => break,
+            }
+        }});
+    rx
 }
