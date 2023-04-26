@@ -1,11 +1,12 @@
-use fltk::{app, group::{Flex, Group}, frame::Frame, image::SharedImage, prelude::*, window::Window,
-    enums::{Align, Color, FrameType}};
+use fltk::{app, group::{Flex, Group}, frame::Frame, image::{SharedImage, PngImage}, prelude::*, window::Window,
+           enums::{Align, Color}};
 use std::error::Error;
 use std::thread;
 use std::time::Duration;
 
 const INIT_WINDOW_W: i32 = 1200;
 const INIT_WINDOW_H: i32 = 900;
+const DEFAULT_ART_BYTES: &[u8; 29187] = include_bytes!("resources/img/no-art.png");
 
 #[derive(Debug, Clone)]
 pub enum UIError {
@@ -22,13 +23,31 @@ impl std::fmt::Display for UIError {
 
 impl Error for UIError {}
 
-struct UI {
+pub struct UI {
     art: Frame,
     title: Frame,
     artist: Frame,
 }
 
-fn sample_metadata(ui: &mut UI)
+impl UI {
+    pub fn set_title(&mut self, title: &str) {
+        self.title.set_label(title);
+    }
+
+    pub fn set_artist(&mut self, artist: &str) {
+        self.artist.set_label(artist);
+    }
+
+    pub fn set_album(&mut self, _: &str) {}  // UI currently doesn't have an Album field
+
+    pub fn set_art<T: ImageExt>(&mut self, art: T) {
+        // art.scale(self.art.w(), self.art.h(), true, true);
+        // self.art.set_image(Some(art));
+        self.art.set_image_scaled(Some(art));  // Can I just do this instead?  Try it.
+    }
+}
+
+pub fn sample_metadata(ui: &mut UI)
 {
     debug_message("poll_for_metadata started");
     thread::sleep(Duration::from_secs(2));
@@ -36,7 +55,7 @@ fn sample_metadata(ui: &mut UI)
     debug_message(&format!("poll_for_metadata output1: title={}, artist={}", ui.title.label(), ui.artist.label()));
     ui.title.set_label("Like an Armenian");
     ui.artist.set_label("Lana Del Mar");
-    let mut art_image = SharedImage::load("../../linkin_park.jpg").unwrap();
+    let mut art_image = SharedImage::from_image(PngImage::from_data(DEFAULT_ART_BYTES).unwrap()).unwrap();
     art_image.scale(ui.art.w(), ui.art.h(), true, true);
     ui.art.set_image(Some(art_image));
     debug_message(&format!("poll_for_metadata after output1: title={}, artist={}", ui.title.label(), ui.artist.label()));
@@ -55,25 +74,9 @@ fn sample_metadata(ui: &mut UI)
     debug_message("poll_for_metadata done");
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let app = app::App::default();
-    let (mut main_win, mut ui) = make_window();
-    main_win.show();
-
-    let ui_thread = thread::spawn(move || { sample_metadata(&mut ui) });
-
-    while app.wait() {
-        main_win.redraw();
-
-        if ui_thread.is_finished() { break }
-    }
-
-    Ok(())
-}
-
 // Function to create column and row Flex Widgets for holding pad, item, pad col and row
 // This allows the pads to stay fixed, but the center to scale
-fn make_window() -> (Window, UI)
+pub fn make_window() -> (Window, UI)
 {
     let mut main_win = Window::default()
         .with_size(INIT_WINDOW_W, INIT_WINDOW_H)
@@ -164,7 +167,7 @@ fn make_art_title_layout<G>(art_title_area: &mut G) -> UI
     let (art_idx, title_idx, artist_idx) = (0, 1, 2);
 
     let mut art = Frame::default_fill();
-    let art_image = SharedImage::load("../../no-art.jpg").unwrap();
+    let art_image = SharedImage::from_image(PngImage::from_data(DEFAULT_ART_BYTES).unwrap()).unwrap();
     //// frame.set_image(None::<SharedImage>);  // To remove image
     art.set_image(Some(art_image));
     art_title_area.insert(&art, art_idx);
@@ -173,13 +176,13 @@ fn make_art_title_layout<G>(art_title_area: &mut G) -> UI
         .with_pos(0, 0)
         .with_align(Align::BottomLeft | Align::Inside);
     title.set_label("Test title");
-    title.set_label_size(60);
+    title.set_label_size(45);
     art_title_area.insert(&title, title_idx);
 
     let mut artist = Frame::default_fill()
         .with_align(Align::TopLeft | Align::Inside);
     artist.set_label("Test artist");
-    artist.set_label_size(60);
+    artist.set_label_size(45);
     art_title_area.insert(&artist, artist_idx);
 
     art_title_area.resize_callback(move |grp, x, y, w, h| {
@@ -236,7 +239,7 @@ fn debug_draw_frame_boundary(frame: &mut Frame, color: Color) {
 }
 
 #[cfg(not(debug_assertions))]
-fn debug_draw_frame_boundary(frame: &mut Frame, color: Color) {
+fn debug_draw_frame_boundary(_frame: &mut Frame, _color: Color) {
 }
 
 #[cfg(debug_assertions)]
@@ -245,5 +248,5 @@ fn debug_message(s: &str) {
 }
 
 #[cfg(not(debug_assertions))]
-fn debug_message(s: &str) {
+fn debug_message(_s: &str) {
 }

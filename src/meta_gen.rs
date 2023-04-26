@@ -1,21 +1,23 @@
 use amxml::sax::*;
 use std::{fmt::{self, Display}, env, fs::File, io::{self, BufRead, BufReader, Write}, error::Error};
-use std::sync::mpsc;
 use base64::{Engine as _, engine::general_purpose};
 use fltk::{prelude::{ImageExt, FltkError}, image::{SharedImage, JpegImage, PngImage}};
 
+/// Errors coming from Metadata operations
 #[derive(Debug, Clone)]
-struct MetadataError(String);
+pub struct MetadataError(String);
 
 impl Display for MetadataError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Metadata Error: {}", self.0)
+        write!(f, "Error from the metadata thread: {}", self.0)
     }
 }
 
 impl Error for MetadataError {}
 
-enum Metadata {
+/// Every recognized piece of metadata coming from the source gets represented with this enum
+/// Support errors, so that they can be sent over the metadata channel
+pub enum Metadata {
     Track(String),
     Artist(String),
     Album(String),
@@ -36,48 +38,78 @@ impl fmt::Display for Metadata {
     }
 }
 
-impl Metadata {
-    fn make_art(art: Vec<u8>) -> Result<Metadata, Box<dyn std::error::Error>> {
-        if art.len() == 0 {
-            Err(Box::new(MetadataError("Invalid art bytes".to_owned())))
-        }
-        else if art[0] == 0xff {
-            Ok(Metadata::Art(SharedImage::from_image(JpegImage::from_data(&art)?)?))
-        }
-        else {
-            Ok(Metadata::Art(SharedImage::from_image(PngImage::from_data(&art)?)?))
-        }
+// Choosing not to implement this for Metadata,
+// because it does not need to be part of the public interface
+fn make_art(art: Vec<u8>) -> Result<Metadata, Box<dyn std::error::Error>> {
+    if art.len() == 0 {
+        Err(Box::new(MetadataError("Invalid art bytes".to_owned())))
+    }
+    else if art[0] == 0xff {
+        Ok(Metadata::Art(SharedImage::from_image(JpegImage::from_data(&art)?)?))
+    }
+    else {
+        Ok(Metadata::Art(SharedImage::from_image(PngImage::from_data(&art)?)?))
     }
 }
 
-// Executable for viewing shairport-sync metadata on the command line
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let pipe_rx = spawn_metadata_channel()?;
+/// Wrapper for metadata parsing code.
+/// Handles returned errors by printing to stdout, then exiting
+pub fn parse_metadata(pipe_path: Option<&str>, meta_handler: impl FnMut(Metadata) -> Result<(), Box<dyn Error>>) {
+    match parse_metadata_ret_err(pipe_path, meta_handler) {
+        Ok(_) => println!("Metadata handling thread exiting with success"),
+        Err(err) => println!("{}", err),
+    }
+}
+
+/// Function for reading and parsing metadata, then applying a handler func to the resulting data
+/// Can be executed as a separate thread
+pub fn parse_metadata_ret_err(pipe_path: Option<&str>,
+                          mut meta_handler: impl FnMut(Metadata) -> Result<(), Box<dyn Error>>)
+    -> Result<(), Box<dyn Error>> {
+    // If the pipe_path was provided, use it.
+    // If not, there still might be one given as a CLI arg.  Use that.
+    let cli_args: Vec<String> = env::args().collect();
+    let mut meta_buffer: Box<dyn Iterator<Item = io::Result<String>>> = if pipe_path.is_some() || cli_args.len() > 1 {
+        // We're reading from a named pipe at some path
+        let pipe_path = match pipe_path {
+            Some(pipe_path) => pipe_path,
+            None => &cli_args[1],
+        };
+        Box::new(BufReader::new(File::open(pipe_path)?).lines())
+    }
+    else {
+        Box::new(io::stdin().lock().lines())
+    };
+
     let mut xml_metadata = XMLMetadata::new()?;
 
     loop {
-        // println!("Reading pipe");
-        match pipe_rx.try_recv() {
-            Ok(xml_line) => {
-                // println!("Main thread got XML Data:\n  {xml_line}");
+        match meta_buffer.next() {
+            // We got a line of XML metadata from the source.  Parse it
+            Some(Ok(xml_line)) if xml_line.len() > 0 => {
                 for metadata in xml_metadata.parse_line(&xml_line) {
-                    println!("{}", metadata);
+                    meta_handler(metadata)?
                 }
             },
-            Err(mpsc::TryRecvError::Empty) => std::thread::sleep(std::time::Duration::from_millis(100)), // println!("No XML Data"),
-            Err(mpsc::TryRecvError::Disconnected) => break, // { println!("XML reader died"); break },
-        }
-    }
 
+            // No data from the source.  Sleep for a bit.
+            Some(Ok(_)) => std::thread::sleep(std::time::Duration::from_millis(50)),
+
+            // Error reading from the source. Stop looping over it.
+            Some(Err(_)) => break,
+            None => break,
+        }
+    };
     Ok(())
 }
 
-/// Struct keeps track of previously parsed XML.
-/// That way it can be parsed line by line from a pipe
+// Struct keeps track of previously parsed XML.
+// That way it can be parsed line by line from a pipe
 struct XMLMetadata {
     tag_stack: Vec<String>,
     curr_type: String,
     curr_code: String,
+    // If an image def is found but cannot be decoded, send this one in its place
     default_art: SharedImage,
 }
 
@@ -87,10 +119,12 @@ impl XMLMetadata {
             tag_stack: Vec::new(),
             curr_type: "".to_owned(),
             curr_code: "".to_owned(),
-            default_art: SharedImage::from_image(PngImage::from_data(include_bytes!("../resources/img/no-art.png"))?)?,
+            default_art: SharedImage::from_image(PngImage::from_data(include_bytes!("resources/img/no-art.png"))?)?,
         })
     }
 
+    // Parse a line of XML (metadata arg), and return a Vector of Metadata items encountered
+    // Mutate self while running, so that tags/type/code state can be kept up to date
     fn parse_line(&mut self, metadata: &str) -> Vec<Metadata> {
         let mut dec = SaxDecoder::new(metadata).unwrap();
         let def_tag: &str = "No tag";
@@ -132,7 +166,7 @@ impl XMLMetadata {
                                 ("core", "asal") => found_metadata.push(Metadata::Album(decode_xml_b64(chardata))),
                                 ("core", "minm") => found_metadata.push(Metadata::Track(decode_xml_b64(chardata))),
                                 ("ssnc", "PICT") => {
-                                    match Metadata::make_art(general_purpose::STANDARD.decode(chardata).unwrap()) {
+                                    match make_art(general_purpose::STANDARD.decode(chardata).unwrap()) {
                                         Ok(art) => found_metadata.push(art),
                                         Err(e) => {
                                             _ = io::stdout().write_all(format!("Error when processing metadata: {}", e).as_bytes());
@@ -180,61 +214,4 @@ fn decode_xml_b64(chardata: String) -> String {
         },
         Err(error) => { format!("Error when decoding XML b64: {error:?}") },
     }
-}
-
-fn spawn_metadata_channel() -> Result<mpsc::Receiver<String>, Box<dyn std::error::Error>>
-{
-    // If a path arg was provided, open the pipe at that path
-    let cli_args: Vec<String> = env::args().collect();
-    if cli_args.len() > 1 {
-        let pipe_handle = BufReader::new(File::open(&cli_args[1])?);
-        Ok(spawn_metadata_channel_pipe(pipe_handle))
-    }
-    else {
-        Ok(spawn_metadata_channel_stdin())
-    }
-}
-
-// Spawn a thread that reads from stdin and sends back data
-// Reading from stdin line by line is a blocking operation,
-// but reading from the channel this thread returns doesn't have to be
-fn spawn_metadata_channel_stdin() -> mpsc::Receiver<String>
-{
-    let (tx, rx) = mpsc::channel::<String>();
-    // Thread that sends non-empty lines from the pipe over a channel
-    // Thread sleeps on empty lines, ends on pipe read errors or pipe writer close / end of pipe
-    std::thread::spawn(move || {
-        let mut metadata_source = io::stdin().lock().lines();
-
-        loop {
-            match metadata_source.next() {
-                Some(Ok(line)) if line.len() > 0 => tx.send(line).unwrap(),
-                Some(Ok(_)) => std::thread::sleep(std::time::Duration::from_millis(100)),
-                Some(Err(_)) => break,
-                None => break,
-            }
-        }});
-    rx
-}
-
-// Spawn a thread that reads from a pipe and sends back data
-// Reading from a pipe is a blocking operation,
-// but reading from the channel this thread returns doesn't have to be
-fn spawn_metadata_channel_pipe(metadata_pipe: BufReader<File>) -> mpsc::Receiver<String>
-{
-    let (tx, rx) = mpsc::channel::<String>();
-    // Thread that sends non-empty lines from the pipe over a channel
-    // Thread sleeps on empty lines, ends on pipe read errors or pipe writer close / end of pipe
-    std::thread::spawn(move || {
-        let mut metadata_source = metadata_pipe.lines();
-
-        loop {
-            match metadata_source.next() {
-                Some(Ok(line)) if line.len() > 0 => tx.send(line).unwrap(),
-                Some(Ok(_)) => std::thread::sleep(std::time::Duration::from_millis(100)),
-                Some(Err(_)) => break,
-                None => break,
-            }
-        }});
-    rx
 }
