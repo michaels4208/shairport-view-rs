@@ -24,7 +24,7 @@ pub enum Metadata {
     Art(SharedImage),
 }
 
-impl fmt::Display for Metadata {
+impl Display for Metadata {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Track(track) => write!(f, "Track: {}", track),
@@ -40,7 +40,7 @@ impl fmt::Display for Metadata {
 
 // Choosing not to implement this for Metadata,
 // because it does not need to be part of the public interface
-fn make_art(art: Vec<u8>) -> Result<Metadata, Box<dyn std::error::Error>> {
+fn make_art(art: Vec<u8>) -> Result<Metadata, Box<dyn Error>> {
     if art.len() == 0 {
         Err(Box::new(MetadataError("Invalid art bytes".to_owned())))
     }

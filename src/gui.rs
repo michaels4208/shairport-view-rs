@@ -1,5 +1,5 @@
-use fltk::{app, group::{Flex, Group}, frame::Frame, image::{SharedImage, PngImage}, prelude::*, window::Window,
-           enums::{Align, Color}};
+use fltk::{app, group::{Flex, Group}, frame::Frame, image::{SharedImage, PngImage}, prelude::*,
+           window::Window, enums::{Align, Color, FrameType}};
 use std::error::Error;
 use std::thread;
 use std::time::Duration;
@@ -30,48 +30,25 @@ pub struct UI {
 }
 
 impl UI {
+    /// Set the title text in the GUI
     pub fn set_title(&mut self, title: &str) {
         self.title.set_label(title);
     }
 
+    /// Set the artist text in the GUI
     pub fn set_artist(&mut self, artist: &str) {
         self.artist.set_label(artist);
     }
 
+    /// Set the album text in the GUI (currently not displayed)
     pub fn set_album(&mut self, _: &str) {}  // UI currently doesn't have an Album field
 
+    /// Set the album art
     pub fn set_art<T: ImageExt>(&mut self, art: T) {
         // art.scale(self.art.w(), self.art.h(), true, true);
         // self.art.set_image(Some(art));
         self.art.set_image_scaled(Some(art));  // Can I just do this instead?  Try it.
     }
-}
-
-pub fn sample_metadata(ui: &mut UI)
-{
-    debug_message("poll_for_metadata started");
-    thread::sleep(Duration::from_secs(2));
-
-    debug_message(&format!("poll_for_metadata output1: title={}, artist={}", ui.title.label(), ui.artist.label()));
-    ui.title.set_label("Like an Armenian");
-    ui.artist.set_label("Lana Del Mar");
-    let mut art_image = SharedImage::from_image(PngImage::from_data(DEFAULT_ART_BYTES).unwrap()).unwrap();
-    art_image.scale(ui.art.w(), ui.art.h(), true, true);
-    ui.art.set_image(Some(art_image));
-    debug_message(&format!("poll_for_metadata after output1: title={}, artist={}", ui.title.label(), ui.artist.label()));
-    app::awake();
-
-    debug_message("poll_for_metadata sleep before output2");
-    thread::sleep(Duration::from_secs(2));
-
-    debug_message("poll_for_metadata output2");
-    ui.title.set_label("Here Conmigo");
-    ui.artist.set_label("C4vrch35");
-    app::awake();
-
-    debug_message("poll_for_metadata sleep after output2");
-    thread::sleep(Duration::from_secs(2));
-    debug_message("poll_for_metadata done");
 }
 
 // Function to create column and row Flex Widgets for holding pad, item, pad col and row
@@ -175,13 +152,13 @@ fn make_art_title_layout<G>(art_title_area: &mut G) -> UI
     let mut title = Frame::default_fill()
         .with_pos(0, 0)
         .with_align(Align::BottomLeft | Align::Inside);
-    title.set_label("Test title");
+    title.set_label("");
     title.set_label_size(45);
     art_title_area.insert(&title, title_idx);
 
     let mut artist = Frame::default_fill()
         .with_align(Align::TopLeft | Align::Inside);
-    artist.set_label("Test artist");
+    artist.set_label("");
     artist.set_label_size(45);
     art_title_area.insert(&artist, artist_idx);
 
