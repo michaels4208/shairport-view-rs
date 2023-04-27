@@ -54,7 +54,8 @@ fn make_art(art: Vec<u8>) -> Result<Metadata, Box<dyn Error>> {
 
 /// Wrapper for metadata parsing code.
 /// Handles returned errors by printing to stdout, then exiting
-pub fn parse_metadata(pipe_path: Option<&str>, meta_handler: impl FnMut(Metadata) -> Result<(), Box<dyn Error>>) {
+pub fn parse_metadata(pipe_path: Option<&str>, meta_handler: impl FnMut(Metadata)
+    -> Result<(), Box<dyn Error>>) {
     match parse_metadata_ret_err(pipe_path, meta_handler) {
         Ok(_) => println!("Metadata handling thread exiting with success"),
         Err(err) => println!("{}", err),
@@ -66,20 +67,24 @@ pub fn parse_metadata(pipe_path: Option<&str>, meta_handler: impl FnMut(Metadata
 pub fn parse_metadata_ret_err(pipe_path: Option<&str>,
                           mut meta_handler: impl FnMut(Metadata) -> Result<(), Box<dyn Error>>)
     -> Result<(), Box<dyn Error>> {
-    // If the pipe_path was provided, use it.
-    // If not, there still might be one given as a CLI arg.  Use that.
     let cli_args: Vec<String> = env::args().collect();
-    let mut meta_buffer: Box<dyn Iterator<Item = io::Result<String>>> = if pipe_path.is_some() || cli_args.len() > 1 {
-        // We're reading from a named pipe at some path
-        let pipe_path = match pipe_path {
-            Some(pipe_path) => pipe_path,
-            None => &cli_args[1],
+
+    // If a fifo path arg was provided, or there is a fifo path in CLI args, open a FIFO
+    // Otherwise, read from stdin
+    // Handle both cases by assigning to a trait object (pointed to by meta_buffer)
+    let mut meta_buffer: Box<dyn Iterator<Item = io::Result<String>>> =
+        if pipe_path.is_some() || cli_args.len() > 1 {
+            // We're reading from a named pipe at some path
+            let pipe_path = match pipe_path {
+                Some(pipe_path) => pipe_path,
+                None => &cli_args[1],
+            };
+            Box::new(BufReader::new(File::open(pipe_path)?).lines())
+        }
+        else {
+            // Read from stdin
+            Box::new(io::stdin().lock().lines())
         };
-        Box::new(BufReader::new(File::open(pipe_path)?).lines())
-    }
-    else {
-        Box::new(io::stdin().lock().lines())
-    };
 
     let mut xml_metadata = XMLMetadata::new()?;
 
@@ -103,8 +108,8 @@ pub fn parse_metadata_ret_err(pipe_path: Option<&str>,
     Ok(())
 }
 
-// Struct keeps track of previously parsed XML.
-// That way it can be parsed line by line from a pipe
+// Struct keeps track of previously parsed XML (current state of tags)
+// Enables you to parse XML line by line from a pipe
 struct XMLMetadata {
     tag_stack: Vec<String>,
     curr_type: String,
@@ -124,7 +129,7 @@ impl XMLMetadata {
     }
 
     // Parse a line of XML (metadata arg), and return a Vector of Metadata items encountered
-    // Mutate self while running, so that tags/type/code state can be kept up to date
+    // Mutate self while running, so that tags/type/code state is kept up to date
     fn parse_line(&mut self, metadata: &str) -> Vec<Metadata> {
         let mut dec = SaxDecoder::new(metadata).unwrap();
         let def_tag: &str = "No tag";
@@ -192,6 +197,8 @@ impl XMLMetadata {
     }
 }
 
+// Decode hex-encoded strings
+// Clone is needed due to print of original data if decode fails
 fn decode_xml_hex(chardata: String) -> String {
     let ret = match hex::decode(chardata.clone()).map(String::from_utf8) {
         Ok(Ok(strdata)) => strdata,
@@ -204,6 +211,7 @@ fn decode_xml_hex(chardata: String) -> String {
     ret
 }
 
+// Decode base64-encoded strings
 fn decode_xml_b64(chardata: String) -> String {
     let chardata = chardata.trim();
     // println!("Trying to decode b64: '{chardata}'");

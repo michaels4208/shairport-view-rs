@@ -9,12 +9,13 @@ description = "Rust GUI and CLI viewer for metadata produced by shairport-sync"
 homepage = "https://github.com/michaels4208/shairport-view-rs"
 default-run = "shairport_view_gui"
 
-# [[bin]]
-# name = "shairport_view_gui"
-# src = "src/bin/shairport_view_gui.rs"
-#
-# [[bin]]
-# name = "shairport_view_cli"
+[[bin]]
+name = "shairport_view_gui"
+#src = "src/bin/shairport_view_gui.rs"
+
+[[bin]]
+name = "shairport_view_cli"
+#src = "src/bin/shairport_view_cli.rs"
 
 [dependencies]
 fltk = { version = "1.3", features = ["fltk-bundled"] }

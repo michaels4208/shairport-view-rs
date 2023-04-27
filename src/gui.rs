@@ -1,8 +1,6 @@
-use fltk::{app, group::{Flex, Group}, frame::Frame, image::{SharedImage, PngImage}, prelude::*,
+use fltk::{group::{Flex, Group}, frame::Frame, image::{SharedImage, PngImage}, prelude::*,
            window::Window, enums::{Align, Color, FrameType}};
 use std::error::Error;
-use std::thread;
-use std::time::Duration;
 
 const INIT_WINDOW_W: i32 = 1200;
 const INIT_WINDOW_H: i32 = 900;
@@ -23,6 +21,7 @@ impl std::fmt::Display for UIError {
 
 impl Error for UIError {}
 
+/// Contains all user interface items that can be interacted with
 pub struct UI {
     art: Frame,
     title: Frame,
@@ -51,8 +50,8 @@ impl UI {
     }
 }
 
-// Function to create column and row Flex Widgets for holding pad, item, pad col and row
-// This allows the pads to stay fixed, but the center to scale
+/// Function to create column and row Flex Widgets for holding pad, item, pad col and row
+/// This allows the pads to stay fixed, but the center to scale
 pub fn make_window() -> (Window, UI)
 {
     let mut main_win = Window::default()
@@ -210,20 +209,27 @@ fn make_art_title_layout<G>(art_title_area: &mut G) -> UI
 }
 
 #[cfg(debug_assertions)]
+#[allow(dead_code)]
 fn debug_draw_frame_boundary(frame: &mut Frame, color: Color) {
+    // Draw frame boundaries when running `cargo build` or `cargo run`
     frame.set_color(color);
     frame.set_frame(FrameType::BorderFrame);
 }
 
 #[cfg(not(debug_assertions))]
+#[allow(dead_code)]
 fn debug_draw_frame_boundary(_frame: &mut Frame, _color: Color) {
+    // Don't draw frame boundaries when running `cargo build --release` or `cargo run --release`
 }
 
 #[cfg(debug_assertions)]
+#[allow(dead_code)]
 fn debug_message(s: &str) {
+    // Print debug messages only when running in non --release mode
     println!("{}", s);
 }
 
 #[cfg(not(debug_assertions))]
+#[allow(dead_code)]
 fn debug_message(_s: &str) {
 }

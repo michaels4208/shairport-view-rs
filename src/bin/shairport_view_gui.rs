@@ -3,6 +3,7 @@ use std::{thread, error::Error};
 use shairport_view_rs::{gui, meta_gen::{self, Metadata}};
 
 
+/// Executable for viewing shairport-sync metadata in a GUI.
 fn main() -> Result<(), Box<dyn Error>> {
     let app = fltk::app::App::default();
     let (mut main_win, mut ui) = gui::make_window();
