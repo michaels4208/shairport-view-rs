@@ -1,6 +1,10 @@
 use fltk::{group::{Flex, Group}, frame::Frame, image::{SharedImage, PngImage}, prelude::*,
-           window::Window, enums::{Align, Color, FrameType}};
+           window::Window, enums::{Align, Color}};
 use std::error::Error;
+
+#[cfg(debug_assertions)]
+use fltk::enums::FrameType;
+
 
 const INIT_WINDOW_W: i32 = 1200;
 const INIT_WINDOW_H: i32 = 900;
@@ -161,20 +165,27 @@ fn make_art_title_layout<G>(art_title_area: &mut G) -> UI
     artist.set_label_size(45);
     art_title_area.insert(&artist, artist_idx);
 
+    //When the group holding the art and title/artist text changes, resize its contents
     art_title_area.resize_callback(move |grp, x, y, w, h| {
-        let art_side_w = w * 4 / 10;
-        let vert_spacer = 40;
+        let art_side_w = w * 4 / 10;  // Art is the left 40%
+        let vert_spacer = w * 1 / 30;  // Separates art from text. ~3% of width
 
         // Art is square, and no bigger than either the height or 40% of the width of this area
         let art_size = std::cmp::min(h, art_side_w);
-        let art_x = x + (w * 4 / 10 - art_size);  // Right-justify 40% into area
+        let art_x = x + (w * 4 / 10 - art_size);  // Right-justify art in its left 40% area
         let art_y = y + (h - art_size) / 2;  // Center vertically in area
 
-        let text_x = x + art_side_w + vert_spacer;  // Text is right of the art area, plus a spacer
+        let text_x = x + art_side_w + vert_spacer;  // Text is right of art area, plus spacer
         let text_w = w - art_side_w - vert_spacer;
         let text_h = art_size * 2 / 10;
-        let title_y = art_y + art_size * 7 / 20;  // Title starts % down from top of art
-        let artist_y = art_y + art_size * 13 / 20;  // Artist starts 70% down from top of art
+        let title_y = art_y + art_size * 7 / 20;  // Title starts 35% down from top of art
+        let artist_y = art_y + art_size * 13 / 20;  // Artist starts 65% down from top of art
+
+        // When art_size is 1000px, we want text to be about 80pt
+        // When art_size is 500px, we want text to be about 40pt
+        // 1000x + y = 80
+        // 500x + y = 40
+        let label_size = art_size * 8 / 100;
 
         if let Some(mut art_frame) = grp.child(art_idx) {
             art_frame.set_size(art_size, art_size);
@@ -192,11 +203,13 @@ fn make_art_title_layout<G>(art_title_area: &mut G) -> UI
         if let Some(mut title_frame) = grp.child(title_idx) {
             title_frame.set_size(text_w, text_h);
             title_frame.set_pos(text_x, title_y);
+            title_frame.set_label_size(label_size);
         }
 
         if let Some(mut artist_frame) = grp.child(artist_idx) {
             artist_frame.set_size(text_w, text_h);
             artist_frame.set_pos(text_x, artist_y);
+            artist_frame.set_label_size(label_size);
         }
     });
 
