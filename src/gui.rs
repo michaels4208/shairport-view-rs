@@ -1,6 +1,5 @@
 use fltk::{group::{Flex, Group}, frame::Frame, image::{SharedImage, PngImage}, prelude::*,
            window::Window, enums::{Align, Color}};
-use std::error::Error;
 
 #[cfg(debug_assertions)]
 use fltk::enums::FrameType;
@@ -9,21 +8,6 @@ use fltk::enums::FrameType;
 const INIT_WINDOW_W: i32 = 1200;
 const INIT_WINDOW_H: i32 = 900;
 const DEFAULT_ART_BYTES: &[u8; 29187] = include_bytes!("resources/img/no-art.png");
-
-#[derive(Debug, Clone)]
-pub enum UIError {
-    NoSource,
-}
-
-impl std::fmt::Display for UIError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            UIError::NoSource => write!(f, "No Metadata source to UI")
-        }
-    }
-}
-
-impl Error for UIError {}
 
 /// Contains all user interface items that can be interacted with
 pub struct UI {

@@ -16,7 +16,6 @@ impl Display for MetadataError {
 impl Error for MetadataError {}
 
 /// Every recognized piece of metadata coming from the source gets represented with this enum
-/// Support errors, so that they can be sent over the metadata channel
 pub enum Metadata {
     Track(String),
     Artist(String),
@@ -54,8 +53,9 @@ fn make_art(art: Vec<u8>) -> Result<Metadata, Box<dyn Error>> {
 
 /// Wrapper for metadata parsing code.
 /// Handles returned errors by printing to stdout, then exiting
-pub fn parse_metadata(pipe_path: Option<&str>, meta_handler: impl FnMut(Metadata)
-    -> Result<(), Box<dyn Error>>) {
+pub fn parse_metadata(pipe_path: Option<&str>,
+                      meta_handler: impl FnMut(Metadata) -> Result<(), Box<dyn Error>>)
+{
     match parse_metadata_ret_err(pipe_path, meta_handler) {
         Ok(_) => println!("Metadata handling thread exiting with success"),
         Err(err) => println!("{}", err),
@@ -64,9 +64,11 @@ pub fn parse_metadata(pipe_path: Option<&str>, meta_handler: impl FnMut(Metadata
 
 /// Function for reading and parsing metadata, then applying a handler func to the resulting data
 /// Can be executed as a separate thread
-pub fn parse_metadata_ret_err(pipe_path: Option<&str>,
-                          mut meta_handler: impl FnMut(Metadata) -> Result<(), Box<dyn Error>>)
-    -> Result<(), Box<dyn Error>> {
+pub fn parse_metadata_ret_err(
+    pipe_path: Option<&str>,
+    mut meta_handler: impl FnMut(Metadata) -> Result<(), Box<dyn Error>>)
+    -> Result<(), Box<dyn Error>>
+{
     let cli_args: Vec<String> = env::args().collect();
 
     // If a fifo path arg was provided, or there is a fifo path in CLI args, open a FIFO
@@ -124,7 +126,8 @@ impl XMLMetadata {
             tag_stack: Vec::new(),
             curr_type: "".to_owned(),
             curr_code: "".to_owned(),
-            default_art: SharedImage::from_image(PngImage::from_data(include_bytes!("resources/img/no-art.png"))?)?,
+            default_art: SharedImage::from_image(
+                PngImage::from_data(include_bytes!("resources/img/no-art.png"))?)?,
         })
     }
 
